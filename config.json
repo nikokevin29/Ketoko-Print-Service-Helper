@@ -1,0 +1,21 @@
+{
+  "printer": {
+    "tipe_koneksi": "1",
+    "usb_device": "/dev/usb/lp0",
+    "ip_address": "",
+    "ip_address_port": "9100",
+    "bt_address": "",
+    "bt_name": "",
+    "ukuran_kertas": "32",
+    "jml_print_nota": "1",
+    "jml_baris_kosong": "2",
+    "autocutter": "1",
+    "cashdrawer": "0",
+    "logo_aktif": "0",
+    "align_header": "2",
+    "align_footer": "1",
+    "opsi_baris": "1",
+    "opsi_pelses": "1",
+    "keterangan": "Terima Kasih telah berbelanja di toko kami."
+  }
+}

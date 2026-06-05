@@ -1,0 +1,14 @@
+[Unit]
+Description=Ketoko POS Print Service (Linux)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/share/ketoko-print-svc/service.py
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
