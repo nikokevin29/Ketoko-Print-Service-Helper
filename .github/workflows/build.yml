@@ -1,0 +1,205 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 1.0.0)"
+        required: false
+        default: "dev"
+
+jobs:
+  # ── Windows — exe + Inno Setup installer ──────────────────────────────────
+  build-windows:
+    name: Windows Installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install pyinstaller flask pywin32 pyserial pystray pillow
+
+      - name: Build KetokoPrintService.exe
+        run: pyinstaller --clean KetokoPrintService.spec
+
+      - name: Build KetokoPrintConfig.exe
+        run: pyinstaller --clean KetokoPrintConfig.spec
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $v = "${{ github.ref_name }}" -replace '^v', ''
+          } else {
+            $v = "${{ github.event.inputs.version }}"
+            if (-not $v) { $v = "dev" }
+          }
+          echo "VERSION=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer with Inno Setup
+        run: iscc /DAppVersion=${{ steps.ver.outputs.VERSION }} installer.iss
+
+      - name: Rename installer with version
+        shell: pwsh
+        run: |
+          $src = Get-ChildItem dist\KetokoPrintService_Setup_*.exe | Select-Object -First 1
+          $dst = "dist\KetokoPrintService_Setup_${{ steps.ver.outputs.VERSION }}_windows.exe"
+          Move-Item $src.FullName $dst -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/KetokoPrintService_Setup_*_windows.exe
+
+  # ── Linux — standalone binary + systemd package ──────────────────────────
+  build-linux:
+    name: Linux Binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install pyinstaller flask pyserial
+
+      - name: Build service binary
+        run: |
+          pyinstaller --onefile --name KetokoPrintService \
+            --hidden-import flask \
+            --hidden-import werkzeug \
+            --hidden-import serial \
+            service.py
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "VERSION=${{ github.ref_name }}" | sed 's/^VERSION=v/VERSION=/' >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${{ github.event.inputs.version || 'dev' }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Package tar.gz
+        run: |
+          PKG="KetokoPrintService-${{ steps.ver.outputs.VERSION }}-linux-x64"
+          mkdir -p "$PKG"
+          cp dist/KetokoPrintService "$PKG/"
+          cp config.json install.sh ketoko-print.service "$PKG/"
+          cp README.md "$PKG/"
+          chmod +x "$PKG/install.sh" "$PKG/KetokoPrintService"
+          tar -czf "${PKG}.tar.gz" "$PKG"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: KetokoPrintService-*-linux-x64.tar.gz
+
+  # ── macOS — standalone binary (not tested) ───────────────────────────────
+  build-macos:
+    name: macOS Binary (not tested)
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install pyinstaller flask pyserial
+
+      - name: Build service binary
+        run: |
+          pyinstaller --onefile --name KetokoPrintService \
+            --hidden-import flask \
+            --hidden-import werkzeug \
+            --hidden-import serial \
+            service.py
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "VERSION=${{ github.ref_name }}" | sed 's/^VERSION=v/VERSION=/' >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${{ github.event.inputs.version || 'dev' }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Package zip
+        run: |
+          PKG="KetokoPrintService-${{ steps.ver.outputs.VERSION }}-macos-x64"
+          mkdir -p "$PKG"
+          cp dist/KetokoPrintService "$PKG/"
+          cp config.json install.sh id.ketoko.print.plist "$PKG/"
+          cp README.md "$PKG/"
+          chmod +x "$PKG/install.sh" "$PKG/KetokoPrintService"
+          zip -r "${PKG}.zip" "$PKG"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: KetokoPrintService-*-macos-x64.zip
+
+  # ── GitHub Release — hanya saat push tag ─────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: artifacts
+
+      - name: List artifacts
+        run: ls -lh artifacts/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: "Ketoko POS Print Service ${{ github.ref_name }}"
+          body: |
+            ## Ketoko POS Print Service ${{ github.ref_name }}
+
+            ### Download
+
+            | Platform | File | Keterangan |
+            |----------|------|------------|
+            | Windows | `*_windows.exe` | Installer — double click, ikuti wizard |
+            | Linux x64 | `*-linux-x64.tar.gz` | Extract + jalankan `install.sh` |
+            | macOS x64 | `*-macos-x64.zip` | Extract + jalankan `install.sh` ⚠️ *not tested* |
+
+            ### Cara Install Windows
+            1. Download `KetokoPrintService_Setup_*_windows.exe`
+            2. Jalankan sebagai Administrator
+            3. Centang "Jalankan otomatis saat Windows login"
+            4. Selesai — service aktif di port 5488
+
+            ### Cara Install Linux
+            ```bash
+            tar -xzf KetokoPrintService-*-linux-x64.tar.gz
+            cd KetokoPrintService-*/
+            chmod +x install.sh
+            sudo ./install.sh
+            sudo systemctl enable --now ketoko-print
+            ```
+
+            > ⚠️ macOS build **not tested** — silakan laporkan hasil pengujian via Issues.
+          files: artifacts/*
+          generate_release_notes: false

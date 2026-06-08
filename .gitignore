@@ -5,3 +5,8 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+captured_print.log
+stdout.log
+stderr.log
+out.log
+err.log

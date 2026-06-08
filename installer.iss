@@ -2,7 +2,9 @@
 ; Requires: build.bat sudah dijalankan (dist\ berisi kedua .exe)
 
 #define AppName      "Ketoko POS Print Service"
-#define AppVersion   "1.0.0"
+#ifndef AppVersion
+  #define AppVersion "1.0.0"
+#endif
 #define AppPublisher "xbnn29"
 #define AppURL       "https://github.com/nikokevin29/ketoko-print-linux"
 #define ServiceExe   "KetokoPrintService.exe"
