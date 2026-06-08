@@ -1,22 +1,81 @@
-# Ketoko POS Print Service
+# Ketoko Print Service Helper — Cross-Platform
 
-Cross-platform replacement for the Windows-only `KetokoPrnSvc.exe` — enables **Ketoko Web 2.0** (`pos.ketoko.co.id`) to print receipts on Linux, macOS, and Windows without the original binary.
+> Pengganti lintas platform untuk `KetokoPrnSvc.exe` yang hanya tersedia di Windows.
+> Memungkinkan **Ketoko Web 2.0** (`pos.ketoko.co.id`) mencetak nota di Linux, macOS, dan Windows tanpa binary asli.
 
-Runs as an HTTP service on `localhost:5488`, reverse-engineered from the original installer since no public protocol documentation exists.
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blue)
+![Python](https://img.shields.io/badge/python-3.8%2B-yellow)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Port](https://img.shields.io/badge/port-5488-orange)
 
 ---
 
-## Development Status
+## Cara Kerja
 
-| Phase | Fitur | Status |
-|-------|-------|--------|
-| 1 | Core service, `/readconf`, discovery logging, cross-platform | ✅ Selesai |
-| 2 | USB printing — RPP02 58mm (Windows ✅, Linux ✅, macOS ✅) | ✅ Selesai |
-| 3 | Network printing via TCP/IP (port 9100) | ✅ Selesai |
-| 4 | Bluetooth printing | ✅ Selesai (⚠️ *not tested* — unit RPP02 tanpa modul Bluetooth) |
-| 5 | Peripheral control — cash drawer, auto cutter, `/testprint`, `/cashdrawer`, `/cut` | ✅ Selesai (⚠️ *not tested* — unit RPP02 tanpa port RJ11) |
-| 6 | Config GUI (`gui.py`) — printer selector, status indicator | ✅ Selesai (Windows ✅, Linux ⚠️ *not tested*, macOS ⚠️ *not tested*) |
-| 7 | System tray (`tray.py`) — background service + tray menu | ✅ Selesai (Windows ✅, Linux ⚠️ *not tested*, macOS ⚠️ *not tested*) |
+```
+Ketoko Web 2.0  ──HTTP──►  localhost:5488  ──ESC/POS──►  Printer
+(pos.ketoko.co.id)          service.py                  (USB / Network / BT)
+```
+
+Service berjalan di `localhost:5488` dan meniru protokol `KetokoPrnSvc.exe` yang di-*reverse-engineer* dari installer aslinya.
+
+---
+
+## Download & Install
+
+### Windows (Recommended)
+
+| File | Keterangan |
+|------|------------|
+| `KetokoPrintService_Setup_*_windows.exe` | Installer lengkap — double click, ikuti wizard |
+
+**Langkah install:**
+1. Download installer dari [Releases](../../releases/latest)
+2. Jalankan sebagai **Administrator**
+3. Centang *"Jalankan otomatis saat Windows login"*
+4. Service langsung aktif di port 5488
+
+> Shortcut **Pengaturan Printer** tersedia di Start Menu untuk memilih printer USB dan cek status.
+
+---
+
+### Linux x64
+
+```bash
+tar -xzf KetokoPrintService-*-linux-x64.tar.gz
+cd KetokoPrintService-*/
+chmod +x install.sh
+sudo ./install.sh
+sudo systemctl enable --now ketoko-print
+```
+
+---
+
+### macOS
+
+> ⚠️ **Not tested** — binary tersedia di Releases, belum diuji di hardware nyata. Silakan laporkan hasil uji via Issues.
+
+```bash
+unzip KetokoPrintService-*-macos-x64.zip
+cd KetokoPrintService-*/
+chmod +x install.sh KetokoPrintService
+./install.sh
+```
+
+---
+
+## Fitur
+
+| Fitur | Windows | Linux | macOS |
+|-------|:-------:|:-----:|:-----:|
+| Core service HTTP (port 5488) | ✅ | ✅ | ✅ |
+| USB printing (ESC/POS) | ✅ | ✅ | ✅ |
+| Network printing (TCP/IP) | ✅ | ✅ | ✅ |
+| Bluetooth printing | ✅ | ⚠️ *not tested* | ⚠️ *not tested* |
+| Auto cutter / Cash drawer | ✅ | ⚠️ *not tested* | ⚠️ *not tested* |
+| Config GUI (tkinter) | ✅ | ⚠️ *not tested* | ⚠️ *not tested* |
+| System tray (pystray) | ✅ | ⚠️ *not tested* | ⚠️ *not tested* |
+| Windows installer (Inno Setup) | ✅ | — | — |
 
 ---
 
@@ -24,12 +83,14 @@ Runs as an HTTP service on `localhost:5488`, reverse-engineered from the origina
 
 | Endpoint | Method | Deskripsi |
 |----------|--------|-----------|
-| `/readconf` | POST | Kembalikan konfigurasi printer ke Ketoko Web 2.0 |
-| `/print` `/printusb` `/printnet` `/printbt` | POST | Terima `data_print` (base64 ESC/POS), kirim ke printer |
-| `/testprint` | GET/POST | Cetak test receipt — verifikasi koneksi printer |
-| `/cashdrawer` | GET/POST | Pulse buka cash drawer (`ESC p`) |
-| `/cut` | GET/POST | Trigger auto cutter (`GS V`) |
-| `/status` | GET | Health check + info konfigurasi aktif |
+| `/readconf` | POST | Baca konfigurasi printer |
+| `/prtraw` | POST | Print nota (ESC/POS base64 JSON) |
+| `/print` `/printusb` `/printnet` `/printbt` | POST | Print via jalur spesifik |
+| `/saveconf` | POST | Simpan konfigurasi dari web |
+| `/testprint` | GET/POST | Cetak test receipt |
+| `/cashdrawer` | GET/POST | Buka cash drawer |
+| `/cut` | GET/POST | Trigger auto cutter |
+| `/status` | GET | Health check + info config aktif |
 
 ---
 
@@ -39,166 +100,65 @@ Runs as an HTTP service on `localhost:5488`, reverse-engineered from the origina
 {
   "printer": {
     "tipe_koneksi":       "1",
+    "usb_device_windows": "Ecoprint MP58",
     "usb_device_linux":   "/dev/usb/lp0",
     "usb_device_mac":     "",
-    "usb_device_windows": "Ecoprint MP58",
-    "bt_com_port":        "",
-    "bt_device_linux":    "/dev/rfcomm0",
-    "bt_device_mac":      "",
-    "bt_address":         "",
-    "bt_name":            "",
     "ip_address":         "",
     "ip_address_port":    "9100",
-    "ukuran_kertas":      "22",
-    "jml_print_nota":     "1",
-    "jml_baris_kosong":   "2",
-    "autocutter":         "0",
-    "cashdrawer":         "0",
-    "logo_aktif":         "0",
-    "align_header":       "2",
-    "align_footer":       "1",
-    "opsi_baris":         "1",
-    "opsi_pelses":        "1",
+    "bt_com_port":        "",
+    "bt_device_linux":    "/dev/rfcomm0",
+    "ukuran_kertas":      "32",
+    "autocutter":         "1",
+    "cashdrawer":         "1",
     "keterangan":         "Terima Kasih telah berbelanja di toko kami."
   }
 }
 ```
 
-### `tipe_koneksi`
-| Nilai | Mode |
-|-------|------|
-| `1` | USB |
-| `2` | Network/IP |
-| `3` | Bluetooth |
+| Key | Nilai | Keterangan |
+|-----|-------|------------|
+| `tipe_koneksi` | `1` = USB, `2` = Network, `3` = Bluetooth | Mode koneksi printer |
+| `ukuran_kertas` | `22` = 58mm, `32` = 76mm | Lebar kertas |
 
-### `ukuran_kertas`
-| Nilai | Ukuran |
-|-------|--------|
-| `22` | 58mm (RPP02, thermal) |
-| `32` | 76mm (Epson TM-U220, dot matrix) |
-
-### Bluetooth (`tipe_koneksi: "3"`)
-- **Windows**: Pair printer via Bluetooth Settings → Windows buat virtual COM port → isi `bt_com_port` (contoh: `"COM5"`)
-- **Linux**: `sudo rfcomm bind 0 <MAC>` → isi `bt_device_linux` (default: `/dev/rfcomm0`)
-- **macOS**: isi `bt_device_mac` (contoh: `/dev/tty.RPP02-SerialPort`)
-
-> ⚠️ **Not tested** — Bluetooth belum diuji. Unit RPP02 yang tersedia tidak memiliki modul Bluetooth.
-
-### Cash Drawer & Auto Cutter
-- `autocutter: "1"` — kirim `GS V` (partial cut) setelah setiap print
-- `cashdrawer: "1"` — kirim `ESC p` (pulse pin 2) setelah setiap print
-- Bisa juga trigger manual via endpoint `/cashdrawer` dan `/cut`
-
-> ⚠️ **Not tested** — Unit RPP02 yang tersedia tidak memiliki port RJ11 untuk cash drawer dan auto cutter.
+> Konfigurasi utama (ukuran kertas, keterangan, dll.) diatur langsung dari **Ketoko Web** — tidak perlu ubah manual.
 
 ---
 
-## Printer yang Didukung
+## Build dari Source
 
-| Printer | Kertas | Koneksi | Status |
-|---------|--------|---------|--------|
-| RPP02 | 58mm thermal | USB ✅ / BT ⚠️ | USB tested ✅ |
-| Epson TM-U220 | 76mm dot matrix | USB / Network | Belum diuji |
-| Generic ESC/POS | 58mm / 80mm | USB / Network / BT | Kompatibel |
-
----
-
-## Instalasi
-
-### Opsi A — Installer Windows (direkomendasikan)
-
-1. **Build executable** (butuh Python + PyInstaller di PC developer):
-   ```bat
-   pip install pyinstaller
-   build.bat
-   ```
-   Output: `dist\KetokoPrintService.exe` dan `dist\KetokoPrintConfig.exe`
-
-2. **Buat installer** menggunakan [Inno Setup Compiler](https://jrsoftware.org/isinfo.php):
-   - Buka `installer.iss` → klik **Compile**
-   - Output: `dist\KetokoPrintService_Setup_1.0.0.exe`
-
-3. **Install** di PC target:
-   - Jalankan `KetokoPrintService_Setup_1.0.0.exe`
-   - Centang "Jalankan otomatis saat Windows login" untuk autostart
-   - Selesai — service langsung aktif di port 5488
-
-Shortcut **Pengaturan Printer** tersedia di Start Menu dan Desktop untuk memilih printer USB dan cek status service.
-
----
-
-### Opsi B — Jalankan langsung (developer / Linux / macOS)
-
-#### Prasyarat
-- Python 3.8+
-
-#### Install dependencies
+### Prasyarat
 
 ```bash
-# Windows
-pip install flask pywin32 pyserial pystray pillow
-
-# Linux / macOS
-pip install flask pyserial
+pip install flask pyserial                         # semua platform
+pip install pywin32 pystray pillow                 # Windows only
+pip install pyinstaller                            # untuk build exe
 ```
 
-#### Jalankan service
+### Windows (build installer)
+
+```bat
+build.bat          # PyInstaller → dist\*.exe
+iscc installer.iss # Inno Setup → dist\KetokoPrintService_Setup_*.exe
+```
+
+### Semua Platform (jalankan langsung)
 
 ```bash
-# Windows — headless
-py service.py
-
-# Windows — dengan system tray
-py tray.py
-
-# Linux / macOS — headless
-python3 service.py
+python service.py          # headless service
+python tray.py             # Windows: service + system tray
+python gui.py              # config GUI
 ```
 
-Service berjalan di `http://127.0.0.1:5488`.
+### CI/CD
 
-#### Config GUI
+Build otomatis via GitHub Actions. Buat release baru:
 
 ```bash
-py gui.py         # Windows
-python3 gui.py    # Linux / macOS ⚠️ not tested
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
-Fitur GUI:
-- Tampilkan IP lokal aktif (untuk diisi di Ketoko Web)
-- Dropdown pemilihan printer
-- Tombol Test Print dan indikator status service (hijau/merah)
-
-> ⚠️ **Linux/macOS — not tested**: GUI dan tray belum diuji di Linux/macOS. `lpstat` wajib tersedia (bagian dari CUPS). Silakan laporkan hasil pengujian via Issues.
-
-### Install sebagai system service
-
-**Windows** — jalankan `install.bat` sebagai Administrator.
-
-**Linux (systemd)**:
-```bash
-chmod +x install.sh
-sudo ./install.sh
-sudo systemctl enable --now ketoko-print
-```
-
-**macOS (launchd)**:
-```bash
-chmod +x install.sh
-./install.sh
-```
-
----
-
-## Cara Kerja
-
-Ketoko Web 2.0 (`pos.ketoko.co.id`) berkomunikasi dengan service ini via HTTP ke `localhost:5488`:
-
-1. **`/readconf`** — web app baca konfigurasi printer saat pertama buka POS
-2. **`/print`** — web app kirim data receipt sebagai `data_print` (base64-encoded ESC/POS bytes)
-3. Service decode base64 → kirim raw bytes ke printer sesuai `tipe_koneksi`
-
-Semua request dicatat di `requests.log` dan `captured_print.log` untuk debugging.
+Workflow akan build Windows installer + Linux tar.gz + macOS zip lalu buat GitHub Release.
 
 ---
 
@@ -206,19 +166,52 @@ Semua request dicatat di `requests.log` dan `captured_print.log` untuk debugging
 
 ```
 ketoko-print-linux/
-├── service.py                  # Main HTTP service (port 5488)
+├── service.py                  # Core HTTP service (port 5488)
 ├── gui.py                      # Config GUI — tkinter, cross-platform
 ├── tray.py                     # Windows system tray launcher
 ├── config.json                 # Konfigurasi printer
 ├── requirements.txt            # Python dependencies
+├── KetokoPrintService.spec     # PyInstaller spec (tray + service)
+├── KetokoPrintConfig.spec      # PyInstaller spec (config GUI)
+├── build.bat                   # Build script Windows
+├── installer.iss               # Inno Setup script
 ├── install.sh                  # Installer Linux/macOS
-├── install.bat                 # Installer Windows
 ├── ketoko-print.service        # systemd unit file
-└── id.ketoko.print.plist       # launchd plist (macOS)
+├── id.ketoko.print.plist       # launchd plist (macOS)
+└── .github/workflows/
+    └── build.yml               # CI/CD GitHub Actions
 ```
+
+---
+
+## Printer yang Didukung
+
+| Printer | Kertas | Koneksi | Status |
+|---------|--------|---------|--------|
+| Ecoprint MP58 / RPP02 | 58mm thermal | USB | ✅ Tested |
+| Epson TM-U220 | 76mm dot matrix | USB / Network | Belum diuji |
+| Generic ESC/POS | 58mm / 80mm | USB / Network / BT | Kompatibel |
+
+---
+
+## Troubleshooting
+
+**"Koneksi gagal" di Ketoko Web**
+→ Pastikan `service.py` atau `tray.py` sedang berjalan. Cek `http://127.0.0.1:5488/status`.
+
+**Port 5488 sudah dipakai (Error 503)**
+→ Service asli `KetokoPrnSvc.exe` mendaftarkan port ke http.sys. Hapus dengan:
+```bat
+netsh http delete urlacl url="http://127.0.0.1:5488/"
+netsh http delete urlacl url="http://+:5488/"
+```
+Jalankan sebagai Administrator.
+
+**Printer tidak muncul di dropdown GUI**
+→ Pastikan printer sudah terpasang di Windows (Printers & Scanners). Klik **Refresh**.
 
 ---
 
 ## Lisensi
 
-MIT
+MIT — by [xbnn29](https://github.com/nikokevin29)
