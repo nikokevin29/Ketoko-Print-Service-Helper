@@ -15,6 +15,8 @@ Runs as an HTTP service on `localhost:5488`, reverse-engineered from the origina
 | 3 | Network printing via TCP/IP (port 9100) | ✅ Selesai |
 | 4 | Bluetooth printing | ✅ Selesai (⚠️ *not tested* — unit RPP02 tanpa modul Bluetooth) |
 | 5 | Peripheral control — cash drawer, auto cutter, `/testprint`, `/cashdrawer`, `/cut` | ✅ Selesai (⚠️ *not tested* — unit RPP02 tanpa port RJ11) |
+| 6 | Config GUI (`gui.py`) — printer selector, status indicator | ✅ Selesai (Windows ✅, Linux ⚠️ *not tested*, macOS ⚠️ *not tested*) |
+| 7 | System tray (`tray.py`) — background service + tray menu | ✅ Selesai (Windows ✅, Linux ⚠️ *not tested*, macOS ⚠️ *not tested*) |
 
 ---
 
@@ -103,30 +105,71 @@ Runs as an HTTP service on `localhost:5488`, reverse-engineered from the origina
 
 ## Instalasi
 
-### Prasyarat
+### Opsi A — Installer Windows (direkomendasikan)
+
+1. **Build executable** (butuh Python + PyInstaller di PC developer):
+   ```bat
+   pip install pyinstaller
+   build.bat
+   ```
+   Output: `dist\KetokoPrintService.exe` dan `dist\KetokoPrintConfig.exe`
+
+2. **Buat installer** menggunakan [Inno Setup Compiler](https://jrsoftware.org/isinfo.php):
+   - Buka `installer.iss` → klik **Compile**
+   - Output: `dist\KetokoPrintService_Setup_1.0.0.exe`
+
+3. **Install** di PC target:
+   - Jalankan `KetokoPrintService_Setup_1.0.0.exe`
+   - Centang "Jalankan otomatis saat Windows login" untuk autostart
+   - Selesai — service langsung aktif di port 5488
+
+Shortcut **Pengaturan Printer** tersedia di Start Menu dan Desktop untuk memilih printer USB dan cek status service.
+
+---
+
+### Opsi B — Jalankan langsung (developer / Linux / macOS)
+
+#### Prasyarat
 - Python 3.8+
 
-### Install dependencies
+#### Install dependencies
 
 ```bash
 # Windows
-pip install flask pywin32 pyserial
+pip install flask pywin32 pyserial pystray pillow
 
 # Linux / macOS
 pip install flask pyserial
 ```
 
-### Jalankan service
+#### Jalankan service
 
 ```bash
-# Windows
+# Windows — headless
 py service.py
 
-# Linux / macOS
+# Windows — dengan system tray
+py tray.py
+
+# Linux / macOS — headless
 python3 service.py
 ```
 
 Service berjalan di `http://127.0.0.1:5488`.
+
+#### Config GUI
+
+```bash
+py gui.py         # Windows
+python3 gui.py    # Linux / macOS ⚠️ not tested
+```
+
+Fitur GUI:
+- Tampilkan IP lokal aktif (untuk diisi di Ketoko Web)
+- Dropdown pemilihan printer
+- Tombol Test Print dan indikator status service (hijau/merah)
+
+> ⚠️ **Linux/macOS — not tested**: GUI dan tray belum diuji di Linux/macOS. `lpstat` wajib tersedia (bagian dari CUPS). Silakan laporkan hasil pengujian via Issues.
 
 ### Install sebagai system service
 
@@ -163,7 +206,9 @@ Semua request dicatat di `requests.log` dan `captured_print.log` untuk debugging
 
 ```
 ketoko-print-linux/
-├── service.py                  # Main service
+├── service.py                  # Main HTTP service (port 5488)
+├── gui.py                      # Config GUI — tkinter, cross-platform
+├── tray.py                     # Windows system tray launcher
 ├── config.json                 # Konfigurasi printer
 ├── requirements.txt            # Python dependencies
 ├── install.sh                  # Installer Linux/macOS

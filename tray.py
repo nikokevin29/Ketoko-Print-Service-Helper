@@ -9,7 +9,7 @@ import os
 import threading
 import webbrowser
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 
 # ── Tray icon ─────────────────────────────────────────────────────────────────
 
@@ -34,6 +34,19 @@ def _open_status():
     webbrowser.open("http://127.0.0.1:5488/status")
 
 
+def _open_gui():
+    import subprocess
+    if getattr(sys, "frozen", False):
+        exe = os.path.join(BASE_DIR, "KetokoPrintConfig.exe")
+    else:
+        exe = None
+    if exe and os.path.exists(exe):
+        subprocess.Popen([exe])
+    else:
+        script = os.path.join(BASE_DIR, "gui.py")
+        subprocess.Popen([sys.executable, script])
+
+
 def _run_tray(stop_event):
     try:
         import pystray
@@ -48,7 +61,9 @@ def _run_tray(stop_event):
         menu = pystray.Menu(
             Item("Ketoko Print Service", None, enabled=False),
             pystray.Menu.SEPARATOR,
+            Item("Pengaturan Printer", lambda icon, item: _open_gui()),
             Item("Lihat Status", lambda icon, item: _open_status()),
+            pystray.Menu.SEPARATOR,
             Item("Keluar", on_quit),
         )
 

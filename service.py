@@ -22,7 +22,7 @@ PLATFORM = sys.platform          # linux / darwin / win32
 ARCH     = platform.machine()    # x86_64 / arm64 / AMD64
 
 # ── Config ────────────────────────────────────────────────────────────────────
-BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR    = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 LOG_FILE    = os.path.join(BASE_DIR, "requests.log")
 
