@@ -455,10 +455,14 @@ def prtraw():
 
         # Gabungkan semua row menjadi satu stream bytes
         # Setiap row adalah string ESC/POS — encode latin-1 agar byte value = unicode code point
+        # Tambahkan \n eksplisit agar setiap row cetak di baris sendiri (tidak bergantung auto-wrap printer)
         data_bytes = b""
         for item in rows:
             row = item.get("row", "")
-            data_bytes += row.encode("latin-1", errors="replace")
+            encoded = row.encode("latin-1", errors="replace")
+            if not encoded.endswith(b"\n"):
+                encoded += b"\n"
+            data_bytes += encoded
 
         data_bytes += build_drawer_command(cfg)
 
