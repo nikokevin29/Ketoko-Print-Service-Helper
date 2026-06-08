@@ -33,7 +33,7 @@ CloseApplications=yes
 Name: "indonesian"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "autostart"; Description: "Jalankan otomatis saat Windows login"; GroupDescription: "Opsi tambahan:"; Flags: checked
+Name: "autostart"; Description: "Jalankan otomatis saat Windows login"; GroupDescription: "Opsi tambahan:"
 
 [Files]
 ; Executables
