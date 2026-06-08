@@ -1,160 +1,103 @@
 # Ketoko POS Print Service
 
-Pengganti **KetokoPrnSvc.exe** (Windows Only) untuk **Ketoko Web 2.0** di semua platform.
-Berjalan sebagai HTTP service di `localhost:5488`, kompatibel langsung dengan `pos.ketoko.co.id`.
+Cross-platform replacement for the Windows-only `KetokoPrnSvc.exe` — enables **Ketoko Web 2.0** (`pos.ketoko.co.id`) to print receipts on Linux, macOS, and Windows without the original binary.
 
-> Proyek ini lahir dari hasil reverse engineering installer Windows milik Ketoko,
-> karena tidak ada dokumentasi publik mengenai protokol komunikasi antara
-> `pos.ketoko.co.id` dengan print service lokal.
-
-**Platform yang didukung:**
-
-| Platform | Status |
-|---|---|
-| Linux (semua distro) | ✅ Siap |
-| macOS Intel (x86_64) | ✅ Siap |
-| macOS Apple Silicon (M series) | ✅ Siap |
-| Windows 10/11 | ✅ Siap |
+Runs as an HTTP service on `localhost:5488`, reverse-engineered from the original installer since no public protocol documentation exists.
 
 ---
 
-## Progress Pengembangan
+## Development Status
 
-```
-Phase 1 — Core Service & Cross-platform  [████████████████████] 100%
-Phase 2 — USB Print (TM-U220 & RPP02)    [░░░░░░░░░░░░░░░░░░░░]   0%
-Phase 3 — Bluetooth Print (RPP02)        [░░░░░░░░░░░░░░░░░░░░]   0%
-Phase 4 — Network Print                  [░░░░░░░░░░░░░░░░░░░░]   0%
-Phase 5 — Cash Drawer & Auto Cutter      [░░░░░░░░░░░░░░░░░░░░]   0%
-```
-
----
-
-## Detail Per Phase
-
-### Phase 1 — Core Service & Cross-platform ✅
-
-**Apa yang sudah dikerjakan:**
-
-Dilakukan reverse engineering terhadap `KetokoPrnSvc.exe` menggunakan `innoextract`
-(Inno Setup) dan `monodis` (Mono IL disassembler). Binary menggunakan .NET Framework 4.7.1
-dengan obfuskasi string, sehingga analisis dilanjutkan via source JavaScript di
-`pos.ketoko.co.id`.
-
-Hasil yang ditemukan:
-- Service berjalan di port **5488** via **HTTP POST** (bukan WebSocket)
-- Satu-satunya endpoint yang terkonfirmasi: `POST /readconf` — web app membaca konfigurasi printer dari sini
-- Format response: `{ "number": 0, "data": [{confname, confvalue}, ...] }`
-- Endpoint print belum terkonfirmasi — akan ditemukan via **discovery logger** saat printer real dicolok
-
-**Yang sudah diimplementasikan:**
-- [x] Endpoint `/readconf` dengan format response kompatibel Ketoko Web 2.0
-- [x] Discovery logger — semua request yang masuk dicatat ke `captured_print.log`
-- [x] Deteksi platform otomatis (Linux / macOS / Windows / ARM)
-- [x] Backend print per platform: Linux USB node, macOS CUPS, Windows win32print, Network TCP
-- [x] Auto-start: systemd user service (Linux), LaunchAgent (macOS), Task Scheduler (Windows)
-- [x] Installer: `install.sh` (Linux/macOS), `install.bat` (Windows)
+| Phase | Fitur | Status |
+|-------|-------|--------|
+| 1 | Core service, `/readconf`, discovery logging, cross-platform | ✅ Selesai |
+| 2 | USB printing — RPP02 58mm (Windows ✅, Linux ✅, macOS ✅) | ✅ Selesai |
+| 3 | Network printing via TCP/IP (port 9100) | ✅ Selesai |
+| 4 | Bluetooth printing | ✅ Selesai (⚠️ *not tested* — unit RPP02 tanpa modul Bluetooth) |
+| 5 | Peripheral control — cash drawer, auto cutter, `/testprint`, `/cashdrawer`, `/cut` | ✅ Selesai (⚠️ *not tested* — unit RPP02 tanpa port RJ11) |
 
 ---
 
-### Phase 2 — USB Print: TM-U220 & RPP02 🔜
+## Endpoints
 
-**Apa yang perlu dilakukan:**
+| Endpoint | Method | Deskripsi |
+|----------|--------|-----------|
+| `/readconf` | POST | Kembalikan konfigurasi printer ke Ketoko Web 2.0 |
+| `/print` `/printusb` `/printnet` `/printbt` | POST | Terima `data_print` (base64 ESC/POS), kirim ke printer |
+| `/testprint` | GET/POST | Cetak test receipt — verifikasi koneksi printer |
+| `/cashdrawer` | GET/POST | Pulse buka cash drawer (`ESC p`) |
+| `/cut` | GET/POST | Trigger auto cutter (`GS V`) |
+| `/status` | GET | Health check + info konfigurasi aktif |
 
-Printer belum tersedia saat Phase 1 dikerjakan. Begitu printer dicolok via USB:
+---
 
-1. **Temukan device path** — jalankan setelah colok USB:
-   ```bash
-   # Linux
-   ls /dev/usb/lp* atau dmesg | tail -20
+## Konfigurasi (`config.json`)
 
-   # macOS
-   ls /dev/usb/* atau system_profiler SPUSBDataType
-   ```
-
-2. **Temukan endpoint print** — jalankan service, buka `pos.ketoko.co.id`,
-   lalu coba cetak. Semua request masuk akan tercatat di `captured_print.log`:
-   ```bash
-   tail -f captured_print.log
-   ```
-   Yang perlu dicatat dari log:
-   - Nama endpoint (misal `/print`, `/printusb`, dsb.)
-   - Format field `data_print` (base64? raw ESC/POS? JSON?)
-
-3. **Implementasikan endpoint print** berdasarkan temuan log di atas.
-
-4. **Test per printer:**
-   - Epson TM-U220 76mm — dot matrix, USB
-   - RPP02 58mm — thermal, USB
-
-**Apa yang perlu diupdate di `config.json`:**
 ```json
-"usb_device_linux":   "/dev/usb/lp0",  ← sesuaikan dari dmesg
-"usb_device_mac":     "TM-U220",        ← dari: lpstat -p
-"usb_device_windows": "TM-U220",        ← dari: Get-Printer
-"ukuran_kertas":      "32"              ← 32=76mm, 22=58mm
+{
+  "printer": {
+    "tipe_koneksi":       "1",
+    "usb_device_linux":   "/dev/usb/lp0",
+    "usb_device_mac":     "",
+    "usb_device_windows": "Ecoprint MP58",
+    "bt_com_port":        "",
+    "bt_device_linux":    "/dev/rfcomm0",
+    "bt_device_mac":      "",
+    "bt_address":         "",
+    "bt_name":            "",
+    "ip_address":         "",
+    "ip_address_port":    "9100",
+    "ukuran_kertas":      "22",
+    "jml_print_nota":     "1",
+    "jml_baris_kosong":   "2",
+    "autocutter":         "0",
+    "cashdrawer":         "0",
+    "logo_aktif":         "0",
+    "align_header":       "2",
+    "align_footer":       "1",
+    "opsi_baris":         "1",
+    "opsi_pelses":        "1",
+    "keterangan":         "Terima Kasih telah berbelanja di toko kami."
+  }
+}
 ```
 
----
+### `tipe_koneksi`
+| Nilai | Mode |
+|-------|------|
+| `1` | USB |
+| `2` | Network/IP |
+| `3` | Bluetooth |
 
-### Phase 3 — Bluetooth Print: RPP02 🔜
+### `ukuran_kertas`
+| Nilai | Ukuran |
+|-------|--------|
+| `22` | 58mm (RPP02, thermal) |
+| `32` | 76mm (Epson TM-U220, dot matrix) |
 
-**Apa yang perlu dilakukan:**
+### Bluetooth (`tipe_koneksi: "3"`)
+- **Windows**: Pair printer via Bluetooth Settings → Windows buat virtual COM port → isi `bt_com_port` (contoh: `"COM5"`)
+- **Linux**: `sudo rfcomm bind 0 <MAC>` → isi `bt_device_linux` (default: `/dev/rfcomm0`)
+- **macOS**: isi `bt_device_mac` (contoh: `/dev/tty.RPP02-SerialPort`)
 
-RPP02 mendukung Bluetooth di samping USB. Untuk mengaktifkannya:
+> ⚠️ **Not tested** — Bluetooth belum diuji. Unit RPP02 yang tersedia tidak memiliki modul Bluetooth.
 
-1. **Pairing** RPP02 terlebih dahulu:
-   ```bash
-   # Linux
-   bluetoothctl
-   > scan on
-   > pair <MAC_ADDRESS>
-   > trust <MAC_ADDRESS>
-   ```
+### Cash Drawer & Auto Cutter
+- `autocutter: "1"` — kirim `GS V` (partial cut) setelah setiap print
+- `cashdrawer: "1"` — kirim `ESC p` (pulse pin 2) setelah setiap print
+- Bisa juga trigger manual via endpoint `/cashdrawer` dan `/cut`
 
-2. **Temukan MAC address** RPP02 dari scan Bluetooth.
-
-3. **Implementasikan koneksi RFCOMM** — Bluetooth serial profile untuk printer thermal
-   menggunakan Python library `PyBluez` atau socket RFCOMM langsung.
-
-4. **Update config.json:**
-   ```json
-   "tipe_koneksi": "3",
-   "bt_address":   "XX:XX:XX:XX:XX:XX",
-   "bt_name":      "RPP02"
-   ```
+> ⚠️ **Not tested** — Unit RPP02 yang tersedia tidak memiliki port RJ11 untuk cash drawer dan auto cutter.
 
 ---
 
-### Phase 4 — Network Print 🔜
+## Printer yang Didukung
 
-**Apa yang perlu dilakukan:**
-
-Untuk printer yang terhubung via LAN/WiFi (port 9100 / JetDirect protocol):
-
-1. Backend TCP socket sudah diimplementasikan di `service.py`.
-2. Yang dibutuhkan hanya **testing** dengan printer network nyata.
-3. Update config:
-   ```json
-   "tipe_koneksi":    "2",
-   "ip_address":      "192.168.1.x",
-   "ip_address_port": "9100"
-   ```
-
----
-
-### Phase 5 — Cash Drawer & Auto Cutter 🔜
-
-**Apa yang perlu dilakukan:**
-
-Cash drawer dan auto cutter dikendalikan via perintah ESC/POS yang disisipkan
-sebelum/sesudah data struk:
-
-- **Cash drawer:** ESC/POS command `\x1b\x70\x00\x19\xfa` (pulse pin 2)
-- **Auto cutter:** ESC/POS command `\x1d\x56\x42\x00` (partial cut)
-
-Perlu diverifikasi apakah web app sudah menyertakan command ini di `data_print`,
-atau service ini yang harus menambahkannya berdasarkan config `autocutter` dan `cashdrawer`.
+| Printer | Kertas | Koneksi | Status |
+|---------|--------|---------|--------|
+| RPP02 | 58mm thermal | USB ✅ / BT ⚠️ | USB tested ✅ |
+| Epson TM-U220 | 76mm dot matrix | USB / Network | Belum diuji |
+| Generic ESC/POS | 58mm / 80mm | USB / Network / BT | Kompatibel |
 
 ---
 
@@ -162,108 +105,75 @@ atau service ini yang harus menambahkannya berdasarkan config `autocutter` dan `
 
 ### Prasyarat
 - Python 3.8+
-- pip
 
-### Linux & macOS
+### Install dependencies
+
 ```bash
-git clone https://github.com/nikokevin29/ketoko-print-linux.git
-cd ketoko-print-linux
+# Windows
+pip install flask pywin32 pyserial
+
+# Linux / macOS
+pip install flask pyserial
+```
+
+### Jalankan service
+
+```bash
+# Windows
+py service.py
+
+# Linux / macOS
+python3 service.py
+```
+
+Service berjalan di `http://127.0.0.1:5488`.
+
+### Install sebagai system service
+
+**Windows** — jalankan `install.bat` sebagai Administrator.
+
+**Linux (systemd)**:
+```bash
+chmod +x install.sh
+sudo ./install.sh
+sudo systemctl enable --now ketoko-print
+```
+
+**macOS (launchd)**:
+```bash
 chmod +x install.sh
 ./install.sh
 ```
-
-### Windows
-```bat
-git clone https://github.com/nikokevin29/ketoko-print-linux.git
-cd ketoko-print-linux
-install.bat
-```
-
-### Manual (semua platform)
-```bash
-pip install -r requirements.txt
-python service.py
-```
-
----
-
-## Konfigurasi
-
-Edit `config.json`:
-
-```json
-{
-  "printer": {
-    "tipe_koneksi":      "1",
-    "usb_device_linux":  "/dev/usb/lp0",
-    "usb_device_mac":    "TM-U220",
-    "usb_device_windows":"TM-U220",
-    "ip_address":        "",
-    "ip_address_port":   "9100",
-    "bt_address":        "",
-    "bt_name":           "",
-    "ukuran_kertas":     "32"
-  }
-}
-```
-
-| `tipe_koneksi` | Mode |
-|---|---|
-| `1` | USB |
-| `2` | Network / IP |
-| `3` | Bluetooth (Phase 3) |
-
-| `ukuran_kertas` | Printer |
-|---|---|
-| `32` | 75–80mm (TM-U220) |
-| `22` | 58mm (RPP02) |
 
 ---
 
 ## Cara Kerja
 
+Ketoko Web 2.0 (`pos.ketoko.co.id`) berkomunikasi dengan service ini via HTTP ke `localhost:5488`:
+
+1. **`/readconf`** — web app baca konfigurasi printer saat pertama buka POS
+2. **`/print`** — web app kirim data receipt sebagai `data_print` (base64-encoded ESC/POS bytes)
+3. Service decode base64 → kirim raw bytes ke printer sesuai `tipe_koneksi`
+
+Semua request dicatat di `requests.log` dan `captured_print.log` untuk debugging.
+
+---
+
+## Struktur Project
+
 ```
-pos.ketoko.co.id (browser)
-        │
-        │ POST /readconf → baca config printer
-        │ POST /print    → kirim data ESC/POS
-        ▼
-localhost:5488  ← service ini
-        │
-        ├── Linux   → /dev/usb/lp0      (direct write)
-        ├── macOS   → lpr -P <name> -o raw  (CUPS)
-        ├── Windows → win32print RAW mode
-        └── Network → TCP socket IP:9100
+ketoko-print-linux/
+├── service.py                  # Main service
+├── config.json                 # Konfigurasi printer
+├── requirements.txt            # Python dependencies
+├── install.sh                  # Installer Linux/macOS
+├── install.bat                 # Installer Windows
+├── ketoko-print.service        # systemd unit file
+└── id.ketoko.print.plist       # launchd plist (macOS)
 ```
 
 ---
 
-## Cek Status Service
+## Lisensi
 
-**Linux:**
-```bash
-systemctl --user status ketoko-print.service
-journalctl --user -u ketoko-print.service -f
-```
-
-**macOS:**
-```bash
-launchctl list | grep ketoko
-tail -f ~/.local/share/ketoko-print-svc/requests.log
-```
-
-**Windows:**
-```powershell
-Get-ScheduledTask -TaskName KetokoPrintService
-```
-
----
-
-## Printer yang Didukung
-
-| Printer | Tipe | Koneksi | Phase |
-|---|---|---|---|
-| Epson TM-U220 | Dot Matrix 76mm | USB | 2 |
-| RPP02 | Thermal 58mm | USB | 2 |
-| RPP02 | Thermal 58mm | Bluetooth | 3 |
-| Generic ESC/POS | — | Network (LAN/WiFi) | 4 |
+MIT
