@@ -14,6 +14,7 @@ import sys
 import tempfile
 import logging
 from datetime import datetime
+from urllib.parse import parse_qs
 from flask import Flask, request, Response
 
 # ── Platform detection ────────────────────────────────────────────────────────
@@ -42,17 +43,38 @@ log = logging.getLogger(__name__)
 app = Flask(__name__)
 
 
+def get_form_field(field: str) -> str:
+    """Get form field — works even if Content-Type header is missing/wrong."""
+    val = request.form.get(field, "")
+    if not val:
+        # Flask won't parse form if Content-Type isn't application/x-www-form-urlencoded.
+        # Ketoko Web sends raw body without proper Content-Type — parse manually.
+        raw = request.get_data(as_text=True)
+        parsed = parse_qs(raw, keep_blank_values=True)
+        val = parsed.get(field, [""])[0]
+    return val
+
+
+def b64decode(s: str) -> bytes:
+    """base64 decode with automatic padding fix."""
+    s += "=" * (-len(s) % 4)
+    return base64.b64decode(s)
+
+
 def load_config():
     with open(CONFIG_FILE) as f:
         return json.load(f)["printer"]
 
 
+MIME = "text/html"
+
+
 def ok(data=""):
-    return json.dumps({"number": 0, "data": data})
+    return json.dumps({"ret": [{"num": 0, "msg": "", "data": data}]})
 
 
 def err(msg):
-    return json.dumps({"number": 1, "data": msg})
+    return json.dumps({"ret": [{"num": -1, "msg": msg, "data": ""}]})
 
 
 # ── ESC/POS helpers ───────────────────────────────────────────────────────────
@@ -204,6 +226,11 @@ def print_bluetooth(data: bytes, cfg: dict) -> None:
 def send_to_printer(data: bytes, cfg: dict) -> None:
     tipe = cfg.get("tipe_koneksi", "1")
 
+    # Fallback: kalau Network dipilih tapi IP kosong, pakai USB
+    if tipe == "2" and not cfg.get("ip_address", "").strip():
+        log.warning("[PRINT] tipe=Network tapi ip_address kosong — fallback ke USB")
+        tipe = "1"
+
     if tipe == "1":
         if PLATFORM.startswith("linux"):
             device = cfg.get("usb_device_linux", "/dev/usb/lp0")
@@ -281,10 +308,11 @@ def readconf():
             {"confname": "PRT_KETERANGAN",        "confvalue": cfg["keterangan"]},
         ]
         log.info("readconf → OK")
-        return Response(ok(data), mimetype="text/plain")
+        # data harus double-encoded (JSON string) sesuai format service asli
+        return Response(ok(json.dumps(data, indent=2)), mimetype=MIME)
     except Exception as e:
         log.error(f"readconf error: {e}")
-        return Response(err(str(e)), mimetype="text/plain")
+        return Response(err(str(e)), mimetype=MIME)
 
 
 @app.route("/print",    methods=["POST", "OPTIONS"])
@@ -296,7 +324,7 @@ def handle_print():
         return Response(status=200)
 
     endpoint  = request.path
-    form_data = request.form.get("data_print", "")
+    form_data = get_form_field("data_print")
 
     log.info(f"[PRINT] endpoint={endpoint}")
 
@@ -308,20 +336,20 @@ def handle_print():
         f.write(f"data_print:\n{form_data[:2000]}\n")
 
     if not form_data:
-        return Response(ok("Logged (no data)"), mimetype="text/plain")
+        return Response(ok("Logged (no data)"), mimetype=MIME)
 
     try:
         cfg        = load_config()
-        data_bytes = base64.b64decode(form_data)
+        data_bytes = b64decode(form_data)
 
         # Append cash drawer pulse after print data if enabled
         data_bytes += build_drawer_command(cfg)
 
         send_to_printer(data_bytes, cfg)
-        return Response(ok("Print berhasil"), mimetype="text/plain")
+        return Response(ok("Print berhasil"), mimetype=MIME)
     except Exception as e:
         log.warning(f"Print error: {e}")
-        return Response(err(str(e)), mimetype="text/plain")
+        return Response(err(str(e)), mimetype=MIME)
 
 
 @app.route("/testprint", methods=["POST", "GET", "OPTIONS"])
@@ -334,10 +362,10 @@ def testprint():
         data = build_test_receipt(cfg)
         send_to_printer(data, cfg)
         log.info("testprint → OK")
-        return Response(ok("Test print berhasil"), mimetype="text/plain")
+        return Response(ok("Test print berhasil"), mimetype=MIME)
     except Exception as e:
         log.error(f"testprint error: {e}")
-        return Response(err(str(e)), mimetype="text/plain")
+        return Response(err(str(e)), mimetype=MIME)
 
 
 @app.route("/cashdrawer", methods=["POST", "GET", "OPTIONS"])
@@ -350,10 +378,10 @@ def cashdrawer():
         # Force kirim pulse meski config cashdrawer=0
         send_to_printer(ESC_INIT + ESC_DRAWER_PIN2, cfg)
         log.info("cashdrawer → pulse sent")
-        return Response(ok("Cash drawer terbuka"), mimetype="text/plain")
+        return Response(ok("Cash drawer terbuka"), mimetype=MIME)
     except Exception as e:
         log.error(f"cashdrawer error: {e}")
-        return Response(err(str(e)), mimetype="text/plain")
+        return Response(err(str(e)), mimetype=MIME)
 
 
 @app.route("/cut", methods=["POST", "GET", "OPTIONS"])
@@ -365,10 +393,10 @@ def cut():
         cfg = load_config()
         send_to_printer(ESC_FEED + ESC_CUT_PARTIAL, cfg)
         log.info("cut → OK")
-        return Response(ok("Cut berhasil"), mimetype="text/plain")
+        return Response(ok("Cut berhasil"), mimetype=MIME)
     except Exception as e:
         log.error(f"cut error: {e}")
-        return Response(err(str(e)), mimetype="text/plain")
+        return Response(err(str(e)), mimetype=MIME)
 
 
 @app.route("/status", methods=["GET", "OPTIONS"])
@@ -387,9 +415,130 @@ def status():
             "autocutter": cfg.get("autocutter") == "1",
             "cashdrawer": cfg.get("cashdrawer") == "1",
         }
-        return Response(ok(info), mimetype="text/plain")
+        return Response(ok(info), mimetype=MIME)
     except Exception as e:
-        return Response(err(str(e)), mimetype="text/plain")
+        return Response(err(str(e)), mimetype=MIME)
+
+
+@app.route("/prtraw", methods=["POST", "OPTIONS"])
+def prtraw():
+    """
+    Endpoint print utama Ketoko Web 2.0.
+    Payload: data_print = base64(JSON)
+    JSON format: {"dataprint": [{"row": "<ESC/POS string>"}, ...]}
+    Tiap row berisi string dengan unicode escapes untuk kontrol ESC/POS (u001b = ESC, dll).
+    """
+    if request.method == "OPTIONS":
+        return Response(status=200)
+
+    content_type = request.content_type or ""
+    raw_body     = request.get_data(as_text=True)
+    form_data    = get_form_field("data_print")
+    log.info(f"[PRTRAW] ct={content_type!r} | form_data_len={len(form_data)} | raw_len={len(raw_body)}")
+
+    with open(os.path.join(BASE_DIR, "captured_print.log"), "a", encoding="utf-8") as f:
+        f.write(f"\n{'='*60}\n")
+        f.write(f"Time:        {datetime.now()}\n")
+        f.write(f"Endpoint:    /prtraw\n")
+        f.write(f"ContentType: {content_type}\n")
+        f.write(f"RawBody:\n{raw_body[:3000]}\n")
+        f.write(f"data_print:\n{form_data[:500]}\n")
+
+    if not form_data:
+        log.warning("[PRTRAW] data_print kosong — Ketoko Web tidak kirim data?")
+        return Response(ok(""), mimetype=MIME)
+
+    try:
+        payload    = json.loads(b64decode(form_data).decode("utf-8"))
+        rows       = payload.get("dataprint", [])
+        cfg        = load_config()
+
+        # Gabungkan semua row menjadi satu stream bytes
+        # Setiap row adalah string ESC/POS — encode latin-1 agar byte value = unicode code point
+        data_bytes = b""
+        for item in rows:
+            row = item.get("row", "")
+            data_bytes += row.encode("latin-1", errors="replace")
+
+        data_bytes += build_drawer_command(cfg)
+
+        log.info(f"[PRTRAW] {len(rows)} rows, {len(data_bytes)} bytes -> printer")
+        send_to_printer(data_bytes, cfg)
+        return Response(ok("Print berhasil"), mimetype=MIME)
+
+    except Exception as e:
+        log.error(f"[PRTRAW] error: {e}")
+        return Response(err(str(e)), mimetype=MIME)
+
+
+# Config key mapping dari Ketoko ke config.json internal
+_CFG_MAP = {
+    "PRT_TIPE_KONEKSI":      "tipe_koneksi",
+    "PRT_USB_DEVICE":        "usb_device_windows",
+    "PRT_IP_ADDRESS":        "ip_address",
+    "PRT_IP_ADDRESS_PORT":   "ip_address_port",
+    "PRT_BT_PRINTER_ADDRESS":"bt_address",
+    "PRT_BT_PRINTER_NAME":   "bt_name",
+    "PRT_UKURAN_KERTAS":     "ukuran_kertas",
+    "PRT_JML_PRINT_NOTA":    "jml_print_nota",
+    "PRT_JML_BARIS_KOSONG":  "jml_baris_kosong",
+    "PRT_AUTOCUTTER":        "autocutter",
+    "PRT_CASHDRAWER":        "cashdrawer",
+    "PRT_LOGO_AKTIF":        "logo_aktif",
+    "PRT_ALIGN_HEADER":      "align_header",
+    "PRT_ALIGN_FOOTER":      "align_footer",
+    "PRT_OPSI_BARIS":        "opsi_baris",
+    "PRT_OPSI_PELSES":       "opsi_pelses",
+    "PRT_KETERANGAN":        "keterangan",
+}
+
+
+@app.route("/saveconf", methods=["POST", "OPTIONS"])
+def saveconf():
+    """
+    Simpan konfigurasi dari Ketoko Web 2.0 ke config.json.
+    Payload: data_print = base64(JSON)
+    JSON format: {"datacfg": [{"KEY": "value", ...}]} atau {"datacfg": [{key: val}, ...]}
+    """
+    if request.method == "OPTIONS":
+        return Response(status=200)
+
+    form_data = get_form_field("data_print")
+    log.info("[SAVECONF] request diterima")
+
+    if not form_data:
+        return Response(ok(""), mimetype=MIME)
+
+    try:
+        payload = json.loads(b64decode(form_data).decode("utf-8"))
+        datacfg = payload.get("datacfg", [])
+
+        # datacfg bisa berupa list of dict {KEY: val} atau list of {confname, confvalue}
+        with open(CONFIG_FILE) as f:
+            full_cfg = json.load(f)
+        cfg = full_cfg["printer"]
+
+        for item in datacfg:
+            if isinstance(item, dict):
+                # Format: {"PRT_TIPE_KONEKSI": "1", ...} (semua dalam 1 dict)
+                for k, v in item.items():
+                    internal_key = _CFG_MAP.get(k)
+                    if internal_key:
+                        # Jangan timpa string koneksi dengan nilai kosong dari web
+                        if internal_key in ("usb_device_windows", "ip_address", "bt_address") and not str(v).strip():
+                            continue
+                        cfg[internal_key] = str(v)
+
+        full_cfg["printer"] = cfg
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(full_cfg, f, indent=2, ensure_ascii=False)
+
+        log.info(f"[SAVECONF] config disimpan: tipe={cfg.get('tipe_koneksi')} kertas={cfg.get('ukuran_kertas')}")
+        return Response(ok("Config disimpan"), mimetype=MIME)
+
+    except Exception as e:
+        log.error(f"[SAVECONF] error: {e}")
+        return Response(err(str(e)), mimetype=MIME)
 
 
 @app.route("/", defaults={"path": ""}, methods=["GET", "POST", "OPTIONS"])
@@ -397,7 +546,7 @@ def status():
 def catch_all(path):
     raw = request.get_data(as_text=True)
     log.info(f"[UNKNOWN] /{path} | body={raw[:300]}")
-    return Response(ok(""), mimetype="text/plain")
+    return Response(ok(""), mimetype=MIME)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -405,5 +554,5 @@ def catch_all(path):
 if __name__ == "__main__":
     log.info(f"Ketoko Print Service — platform={PLATFORM} arch={ARCH}")
     log.info(f"Listening on http://127.0.0.1:5488")
-    log.info(f"Endpoints: /readconf /print /testprint /cashdrawer /cut /status")
+    log.info(f"Endpoints: /readconf /prtraw /saveconf /print /testprint /cashdrawer /cut /status")
     app.run(host="127.0.0.1", port=5488, debug=False)
