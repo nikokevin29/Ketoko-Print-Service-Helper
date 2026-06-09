@@ -168,7 +168,6 @@ jobs:
         with:
           merge-multiple: true
           path: artifacts
-          pattern: "*-build,windows-installer"
 
       - name: List artifacts
         run: ls -lh artifacts/
